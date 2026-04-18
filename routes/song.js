@@ -147,6 +147,19 @@ const song = {
       }
     }
     if (!purl) {
+      if (Number(obj.debug)) {
+        return res.send({
+          result: 400,
+          errMsg: '获取播放链接出错',
+          debug: {
+            uin,
+            hasAuthst: Boolean(qqmusic_key),
+            file,
+            midurlinfo: result && result.req_0 && result.req_0.data && result.req_0.data.midurlinfo,
+            sip: result && result.req_0 && result.req_0.data && result.req_0.data.sip,
+          },
+        });
+      }
       return res.send({
         result: 400,
         errMsg: '获取播放链接出错',

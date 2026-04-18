@@ -20,6 +20,7 @@
 
 - 增加 `api/index.js` 与 `vercel.json`，可直接作为 Vercel Serverless 项目部署。
 - `/song/url?ownCookie=1` 会优先使用请求 Cookie 里的 `uin`、`qqmusic_key` 或 `qm_keyst`，方便上游桥接服务通过 `QQ_COOKIE` 环境变量取链。
+- `/song/url?debug=1` 在取链失败时返回上游 `midurlinfo` 等诊断字段，便于区分 Cookie、版权和部署出口网络问题。
 
 部署后可将 Vercel 地址配置为 LX 桥接服务的 `QQ_API_BASE`。
 
