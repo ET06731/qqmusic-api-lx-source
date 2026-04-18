@@ -14,6 +14,15 @@
 
 ## 快速上手
 
+### LX Music / Vercel 部署说明
+
+此 fork 针对 LX Music 自定义源做了两处部署适配：
+
+- 增加 `api/index.js` 与 `vercel.json`，可直接作为 Vercel Serverless 项目部署。
+- `/song/url?ownCookie=1` 会优先使用请求 Cookie 里的 `uin`、`qqmusic_key` 或 `qm_keyst`，方便上游桥接服务通过 `QQ_COOKIE` 环境变量取链。
+
+部署后可将 Vercel 地址配置为 LX 桥接服务的 `QQ_API_BASE`。
+
 ### Node 服务
 
 ```shell script
