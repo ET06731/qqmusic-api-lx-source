@@ -42,6 +42,7 @@ const song = {
     let {uin, qqmusic_key} = globalCookie.userCookie();
     if (Number(obj.ownCookie)) {
       uin = req.cookies.uin || uin;
+      qqmusic_key = req.cookies.qqmusic_key || req.cookies.qm_keyst || qqmusic_key;
     }
 
     const {id, type = '128', mediaId = id, isRedirect = '0'} = obj;
