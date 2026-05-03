@@ -1,3 +1,78 @@
+const SMARTBOX_SEARCH_TYPES = new Set([0, 8, 9, 12]);
+
+function mapSmartboxItem(type, item) {
+  switch (type) {
+    case 0:
+      return {
+        album: {
+          mid: item.album?.mid || '',
+          name: item.album?.name || '',
+        },
+        docid: item.docid,
+        id: item.id,
+        mid: item.mid,
+        name: item.name,
+        singer: (item.singer || '')
+          .split(/[|/]/)
+          .filter(Boolean)
+          .map((name) => ({name})),
+      };
+    case 8:
+      return {
+        docid: item.docid,
+        id: item.id,
+        mid: item.mid,
+        name: item.name,
+        pic: item.pic,
+        singername: item.singer,
+      };
+    case 9:
+      return {
+        docid: item.docid,
+        id: item.id,
+        mid: item.mid,
+        name: item.name,
+        pic: item.pic,
+      };
+    case 12:
+      return {
+        docid: item.docid,
+        id: item.id,
+        mid: item.mid,
+        name: item.name,
+        singer: item.singer,
+        vid: item.vid,
+      };
+    default:
+      return item;
+  }
+}
+
+function buildSmartboxResponse(result, {key, pageNo, pageSize, t, typeMap}) {
+  const sectionMap = {
+    0: 'song',
+    8: 'album',
+    9: 'singer',
+    12: 'mv',
+  };
+  const sectionKey = sectionMap[t];
+  const section = result?.data?.[sectionKey];
+  const itemlist = Array.isArray(section?.itemlist) ? section.itemlist : [];
+
+  return {
+    result: 100,
+    data: {
+      list: itemlist.map((item) => mapSmartboxItem(Number(t), item)),
+      pageNo: Number(pageNo),
+      pageSize: itemlist.length,
+      total: Number(section?.count || itemlist.length || 0),
+      key,
+      t,
+      type: typeMap[t],
+    },
+  };
+}
+
 module.exports = {
   // 搜索
   '/': async ({req, res, request, cache}) => {
@@ -23,15 +98,6 @@ module.exports = {
       res && res.send(cacheData);
       return cacheData;
     }
-    const url =
-      {
-        // 0: 'https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp',
-        2: `https://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?remoteplace=txt.yqq.playlist&page_no=${
-          pageNo - 1
-        }&num_per_page=${pageSize}&query=${key}`,
-        // 3: 'http://c.y.qq.com/soso/fcgi-bin/client_search_user',
-      }[t] || 'http://c.y.qq.com/soso/fcgi-bin/client_search_cp';
-
     const typeMap = {
       0: 'song',
       2: 'songlist',
@@ -48,35 +114,75 @@ module.exports = {
       });
     }
 
-    let data = {
-      format: 'json', // 返回json格式
-      n: pageSize, // 一页显示多少条信息
-      p: pageNo, // 第几页
-      w: key, // 搜索关键词
-      cr: 1, // 不知道这个参数什么意思，但是加上这个参数你会对搜索结果更满意的
-      g_tk: 5381,
-      t,
-    };
+    const numericType = Number(t);
+    let result;
 
-    if (Number(t) === 2) {
-      data = {
-        query: key,
-        page_no: pageNo - 1,
-        num_per_page: pageSize,
+    if (SMARTBOX_SEARCH_TYPES.has(numericType)) {
+      result = await request(
+        `https://c.y.qq.com/splcloud/fcgi-bin/smartbox_new.fcg?key=${encodeURIComponent(key)}&g_tk=5381`,
+      );
+    } else {
+      const url =
+        {
+          2: `https://c.y.qq.com/soso/fcgi-bin/client_music_search_songlist?remoteplace=txt.yqq.playlist&page_no=${
+            pageNo - 1
+          }&num_per_page=${pageSize}&query=${key}`,
+        }[t] || 'http://c.y.qq.com/soso/fcgi-bin/client_search_cp';
+
+      let data = {
+        format: 'json',
+        n: pageSize,
+        p: pageNo,
+        w: key,
+        cr: 1,
+        g_tk: 5381,
+        t,
       };
-    }
 
-    const result = await request({
-      url,
-      method: 'get',
-      data,
-      headers: {
-        Referer: 'https://y.qq.com',
-      },
-    });
+      if (numericType === 2) {
+        data = {
+          query: key,
+          page_no: pageNo - 1,
+          num_per_page: pageSize,
+        };
+      }
+
+      result = await request({
+        url,
+        method: 'get',
+        data,
+        headers: {
+          Referer: 'https://y.qq.com',
+        },
+      });
+    }
 
     if (Number(raw)) {
       return res.send(result);
+    }
+
+    if (!result) {
+      return;
+    }
+
+    if (SMARTBOX_SEARCH_TYPES.has(numericType)) {
+      const resData = buildSmartboxResponse(result, {
+        key,
+        pageNo,
+        pageSize,
+        t,
+        typeMap,
+      });
+      cache.set(cacheKey, resData, 120);
+      res.send(resData);
+      return resData;
+    }
+
+    if (!result.data) {
+      return res.send({
+        result: 400,
+        errMsg: '搜索接口暂时不可用',
+      });
     }
 
     // 下面是数据格式的美化
