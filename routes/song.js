@@ -1,4 +1,158 @@
+const axios = require('axios');
 const search = require('./search');
+
+const typeMap = {
+  m4a: {
+    s: 'C400',
+    e: '.m4a',
+  },
+  128: {
+    s: 'M500',
+    e: '.mp3',
+  },
+  320: {
+    s: 'M800',
+    e: '.mp3',
+  },
+  ape: {
+    s: 'A000',
+    e: '.ape',
+  },
+  flac: {
+    s: 'F000',
+    e: '.flac',
+  },
+};
+
+const resolveSongUrl = async ({obj, request, cache, globalCookie, req}) => {
+  let {uin, qqmusic_key} = globalCookie.userCookie();
+  if (Number(obj.ownCookie)) {
+    uin = req.cookies.uin || uin;
+    qqmusic_key = req.cookies.qqmusic_key || req.cookies.qm_keyst || qqmusic_key;
+  }
+
+  const {id, type = '128', mediaId = id} = obj;
+  const typeObj = typeMap[type];
+
+  if (!typeObj) {
+    return {
+      error: {
+        result: 500,
+        errMsg: 'type 传错了，看看文档去',
+      },
+    };
+  }
+  if (!id) {
+    return {
+      error: {
+        result: 500,
+        errMsg: 'id ?',
+      },
+    };
+  }
+  const file = `${typeObj.s}${id}${mediaId}${typeObj.e}`;
+  const guid = (Math.random() * 10000000).toFixed(0);
+
+  let purl = '';
+  let count = 0;
+  const cacheKey = `song_url_${file}`;
+  const cacheData = cache.get(cacheKey);
+  if (cacheData) {
+    return {
+      data: cacheData,
+      url: cacheData.data,
+      debug: {
+        cached: true,
+        uin,
+        hasAuthst: Boolean(qqmusic_key),
+        file,
+      },
+    };
+  }
+
+  let domain = '';
+  let result = null;
+  while (!purl && count < 10) {
+    count += 1;
+    result = await request({
+      url: 'https://u.y.qq.com/cgi-bin/musicu.fcg',
+      data: {
+        '-': 'getplaysongvkey',
+        g_tk: 5381,
+        loginUin: uin,
+        hostUin: 0,
+        format: 'json',
+        inCharset: 'utf8',
+        outCharset: 'utf-8¬ice=0',
+        platform: 'yqq.json',
+        needNewCode: 0,
+        data: JSON.stringify({
+          req_0: {
+            module: 'vkey.GetVkeyServer',
+            method: 'CgiGetVkey',
+            param: {
+              filename: [file],
+              guid: guid,
+              songmid: [id],
+              songtype: [0],
+              uin: uin,
+              loginflag: 1,
+              platform: '20',
+            },
+          },
+          comm: {
+            uin: uin,
+            format: 'json',
+            ct: 19,
+            cv: 0,
+            authst: qqmusic_key,
+          },
+        }),
+      },
+    });
+    if (result && result.req_0 && result.req_0.data && result.req_0.data.midurlinfo) {
+      purl = result.req_0.data.midurlinfo[0].purl;
+    }
+    if (domain === '' && result && result.req_0 && result.req_0.data && result.req_0.data.sip) {
+      domain =
+        result.req_0.data.sip.find(i => !i.startsWith('http://ws')) ||
+        result.req_0.data.sip[0];
+    }
+  }
+
+  if (!purl) {
+    return {
+      error: {
+        result: 400,
+        errMsg: '获取播放链接出错',
+      },
+      debug: {
+        cached: false,
+        uin,
+        hasAuthst: Boolean(qqmusic_key),
+        file,
+        midurlinfo: result && result.req_0 && result.req_0.data && result.req_0.data.midurlinfo,
+        sip: result && result.req_0 && result.req_0.data && result.req_0.data.sip,
+      },
+    };
+  }
+
+  const data = {
+    data: `${domain}${purl}`,
+    result: 100,
+  };
+  cache.set(cacheKey, data);
+  return {
+    data,
+    url: data.data,
+    debug: {
+      cached: false,
+      uin,
+      hasAuthst: Boolean(qqmusic_key),
+      file,
+    },
+  };
+};
 
 const song = {
   '/': async ({req, res, request}) => {
@@ -39,143 +193,87 @@ const song = {
 
   '/url': async ({req, res, request, cache, globalCookie}) => {
     const obj = {...req.query, ...req.body};
-    let {uin, qqmusic_key} = globalCookie.userCookie();
-    if (Number(obj.ownCookie)) {
-      uin = req.cookies.uin || uin;
-      qqmusic_key = req.cookies.qqmusic_key || req.cookies.qm_keyst || qqmusic_key;
-    }
+    const {isRedirect = '0'} = obj;
+    const resolved = await resolveSongUrl({obj, request, cache, globalCookie, req});
 
-    const {id, type = '128', mediaId = id, isRedirect = '0'} = obj;
-    const typeMap = {
-      m4a: {
-        s: 'C400',
-        e: '.m4a',
-      },
-      128: {
-        s: 'M500',
-        e: '.mp3',
-      },
-      320: {
-        s: 'M800',
-        e: '.mp3',
-      },
-      ape: {
-        s: 'A000',
-        e: '.ape',
-      },
-      flac: {
-        s: 'F000',
-        e: '.flac',
-      },
-    };
-    const typeObj = typeMap[type];
-
-    if (!typeObj) {
-      return res.send({
-        result: 500,
-        errMsg: 'type 传错了，看看文档去',
-      });
-    }
-    if (!id) {
-      return res.send({
-        result: 500,
-        errMsg: 'id ?',
-      });
-    }
-    const file = `${typeObj.s}${id}${mediaId}${typeObj.e}`;
-    const guid = (Math.random() * 10000000).toFixed(0);
-
-    let purl = '';
-    let count = 0;
-    let cacheKey = `song_url_${file}`;
-    let cacheData = cache.get(cacheKey);
-    if (cacheData) {
-      return res.send(cacheData);
-    }
-    let domain = '';
-    while (!purl && count < 10) {
-      count += 1;
-      const result = await request({
-        url: 'https://u.y.qq.com/cgi-bin/musicu.fcg',
-        data: {
-          '-': 'getplaysongvkey',
-          g_tk: 5381,
-          loginUin: uin,
-          hostUin: 0,
-          format: 'json',
-          inCharset: 'utf8',
-          outCharset: 'utf-8¬ice=0',
-          platform: 'yqq.json',
-          needNewCode: 0,
-          data: JSON.stringify({
-            req_0: {
-              module: 'vkey.GetVkeyServer',
-              method: 'CgiGetVkey',
-              param: {
-                filename: [file],
-                guid: guid,
-                songmid: [id],
-                songtype: [0],
-                uin: uin,
-                loginflag: 1,
-                platform: '20',
-              },
-            },
-            comm: {
-              uin: uin,
-              format: 'json',
-              ct: 19,
-              cv: 0,
-              authst: qqmusic_key,
-            },
-          }),
-        },
-      });
-      if (res && !result.req_0.data) {
-        return res.send({
-          result: 400,
-          errMsg: '获取链接出错，建议检查是否携带 cookie ',
-        });
-      }
-      if (result.req_0 && result.req_0.data && result.req_0.data.midurlinfo) {
-        purl = result.req_0.data.midurlinfo[0].purl;
-      }
-      if (domain === '') {
-        domain =
-          result.req_0.data.sip.find(i => !i.startsWith('http://ws')) ||
-          result.req_0.data.sip[0];
-      }
-    }
-    if (!purl) {
+    if (resolved.error) {
       if (Number(obj.debug)) {
         return res.send({
-          result: 400,
-          errMsg: '获取播放链接出错',
-          debug: {
-            uin,
-            hasAuthst: Boolean(qqmusic_key),
-            file,
-            midurlinfo: result && result.req_0 && result.req_0.data && result.req_0.data.midurlinfo,
-            sip: result && result.req_0 && result.req_0.data && result.req_0.data.sip,
-          },
+          ...resolved.error,
+          debug: resolved.debug,
         });
       }
-      return res.send({
-        result: 400,
-        errMsg: '获取播放链接出错',
-      });
+      return res.send(resolved.error);
     }
 
     if (Number(isRedirect)) {
-      return res.redirect(`${domain}${purl}`);
+      return res.redirect(resolved.url);
     }
 
-    cacheData = {
-      data: `${domain}${purl}`,
-      result: 100,
-    };
-    res.send(cacheData);
-    cache.set(cacheKey, cacheData);
+    res.send(resolved.data);
+  },
+
+  '/stream': async ({req, res, request, cache, globalCookie}) => {
+    const obj = {...req.query, ...req.body};
+    const resolved = await resolveSongUrl({obj, request, cache, globalCookie, req});
+
+    if (resolved.error) {
+      if (Number(obj.debug)) {
+        return res.status(400).send({
+          ...resolved.error,
+          debug: resolved.debug,
+        });
+      }
+      return res.status(400).send(resolved.error);
+    }
+
+    try {
+      const upstream = await axios({
+        method: 'get',
+        url: resolved.url,
+        responseType: 'stream',
+        timeout: 30000,
+        headers: {
+          ...(req.headers.range ? {Range: req.headers.range} : {}),
+          'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0',
+          Accept: req.headers.accept || '*/*',
+        },
+        validateStatus: () => true,
+      });
+
+      res.status(upstream.status);
+      [
+        'content-type',
+        'content-length',
+        'content-range',
+        'accept-ranges',
+        'cache-control',
+        'etag',
+        'last-modified',
+      ].forEach((header) => {
+        if (upstream.headers[header]) res.set(header, upstream.headers[header]);
+      });
+      res.set('Access-Control-Allow-Origin', '*');
+      res.set('X-QQMusic-Stream-Source', resolved.url);
+
+      upstream.data.on('error', (error) => {
+        if (!res.headersSent) {
+          res.status(502).send({
+            result: 400,
+            errMsg: `音频流读取失败：${error.message}`,
+          });
+        } else {
+          res.destroy(error);
+        }
+      });
+
+      upstream.data.pipe(res);
+    } catch (error) {
+      return res.status(502).send({
+        result: 400,
+        errMsg: `音频代理失败：${error.message}`,
+      });
+    }
   },
 
   '/urls': async ({req, res, request, globalCookie, cache}) => {
